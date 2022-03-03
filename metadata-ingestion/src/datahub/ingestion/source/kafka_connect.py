@@ -36,6 +36,7 @@ class KafkaConnectSourceConfig(DatasetLineageProviderConfigBase):
     construct_lineage_workunits: bool = True
     connector_patterns: AllowDenyPattern = AllowDenyPattern.allow_all()
     provided_configs: Optional[List[ProvidedConfig]] = None
+    add_server_name_to_table: Optional[str] = None
 
 
 @dataclass
@@ -515,25 +516,27 @@ class DebeziumSourceConnector:
         source_platform = parser.source_platform
         server_name = parser.server_name
         database_name = parser.database_name
+        schema_name = "public"
+
         topic_naming_pattern = r"({0})\.(\w+\.\w+)".format(server_name)
 
         logger.info(f"Source Platform: {source_platform}, Server name: {server_name}")
-        logger.info(f"Topic Naming Pattern: {topic_naming_pattern}, Database Name: {database_name}")
+        logger.info(f"Database Name: {database_name}")
 
         if not self.connector_manifest.topic_names:
             return lineages
 
         for topic in self.connector_manifest.topic_names:
             found = re.search(re.compile(topic_naming_pattern), topic)
-            logger.info(f"In extract_lineages - found: {found}")
 
             if found:
                 table_name = (
-                    database_name + "." + found.group(2)
+                    server_name + database_name + "." + schema_name + found.group(2)
                     if database_name
                     else found.group(2)
                 )
-                logger.info(f"Table Name: {table_name}")
+
+                logger.info(f"Topic Name: {topic}, Table Name: {table_name}")
 
                 lineage = KafkaConnectLineage(
                     source_dataset=table_name,
