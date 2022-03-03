@@ -517,11 +517,15 @@ class DebeziumSourceConnector:
         database_name = parser.database_name
         topic_naming_pattern = r"({0})\.(\w+\.\w+)".format(server_name)
 
+        logger.info(f"Source Platform: {source_platform}, Server name: {server_name}")
+        logger.info(f"Topic Naming Pattern: {topic_naming_pattern}, Database Name: {database_name}")
+
         if not self.connector_manifest.topic_names:
             return lineages
 
         for topic in self.connector_manifest.topic_names:
             found = re.search(re.compile(topic_naming_pattern), topic)
+            logger.info(f"In extract_lineages - found: {found}")
 
             if found:
                 table_name = (
@@ -529,6 +533,7 @@ class DebeziumSourceConnector:
                     if database_name
                     else found.group(2)
                 )
+                logger.info(f"Table Name: {table_name}")
 
                 lineage = KafkaConnectLineage(
                     source_dataset=table_name,
