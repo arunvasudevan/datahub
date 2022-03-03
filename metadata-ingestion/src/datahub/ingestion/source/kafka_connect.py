@@ -531,7 +531,7 @@ class DebeziumSourceConnector:
 
             if found:
                 table_name = (
-                    server_name + "." + database_name + "." + schema_name + "." + found.group(2)
+                    server_name + "." + database_name + "." + schema_name + "." + found.group(2).split(".")[0]
                     if database_name
                     else found.group(2)
                 )
