@@ -520,6 +520,7 @@ class DebeziumSourceConnector:
         server_name = parser.server_name
         database_name = parser.database_name
         topic_naming_pattern = r"({0})\.(\w+\.\w+)".format(server_name)
+        schema_name = "public"
 
         if not self.connector_manifest.topic_names:
             return lineages
@@ -534,7 +535,13 @@ class DebeziumSourceConnector:
                     and server_name
                 ):
                     table_name = (
-                        server_name + "." + database_name + "." + found.group(2)
+                        server_name
+                        + "."
+                        + database_name
+                        + "."
+                        + schema_name
+                        + "."
+                        + found.group(2).split(".")[0]
                     )
                 elif database_name:
                     table_name = database_name + "." + found.group(2)
