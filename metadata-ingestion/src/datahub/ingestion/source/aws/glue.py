@@ -162,8 +162,14 @@ class GlueSource(Source):
 
         # download the script contents
         # see https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3.html#S3.Client.get_object
-        obj = self.s3_client.get_object(Bucket=bucket, Key=key)
-        script = obj["Body"].read().decode("utf-8")
+
+        
+        try: 
+            obj = self.s3_client.get_object(Bucket=bucket, Key=key)
+            script = obj["Body"].read().decode("utf-8")
+        except Exception as e:
+            print("this is a test message from master branch")
+            print(e)
 
         try:
             # extract the job DAG from the script
