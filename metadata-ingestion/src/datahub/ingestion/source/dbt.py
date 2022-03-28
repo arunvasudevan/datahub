@@ -294,24 +294,24 @@ def load_file_as_json(uri: str) -> Any:
     import boto3
     from urllib.parse import urlparse
 
-    s3 = boto3.resource('s3')
-    u = urlparse(uri)
-    s3_object =  s3.Object(u.netloc, u.path.lstrip('/'))
-    return json.loads(s3_object.get()['Body'].read().decode('utf-8'))
+#     s3 = boto3.resource('s3')
+#     u = urlparse(uri)
+#     s3_object =  s3.Object(u.netloc, u.path.lstrip('/'))
+#     return json.loads(s3_object.get()['Body'].read().decode('utf-8'))
     
-#     if re.match("^https?://", uri):
-#         return json.loads(requests.get(uri).text)
-#     elif re.match("^s3://", uri):   # credit to Patrick
-#         import boto3
-#         from urllib.parse import urlparse
+    if re.match("^https?://", uri):
+        return json.loads(requests.get(uri).text)
+    elif re.match("^s3://", uri):   # credit to Patrick
+        import boto3
+        from urllib.parse import urlparse
 
-#         s3 = boto3.resource('s3')
-#         u = urlparse(uri)
-#         s3_object =  s3.Object(u.netloc, u.path.lstrip('/'))
-#         return json.loads(s3_object.get()['Body'].read().decode('utf-8'))
-#     else:
-#         with open(uri, "r") as f:
-#             return json.load(f)
+        s3 = boto3.resource('s3')
+        u = urlparse(uri)
+        s3_object =  s3.Object(u.netloc, u.path.lstrip('/'))
+        return json.loads(s3_object.get()['Body'].read().decode('utf-8'))
+    else:
+        with open(uri, "r") as f:
+            return json.load(f)
 
 
 def loadManifestAndCatalog(
