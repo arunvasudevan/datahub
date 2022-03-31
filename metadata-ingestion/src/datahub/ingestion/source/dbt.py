@@ -293,21 +293,6 @@ def extract_dbt_entities(
 def load_file_as_json(uri: str) -> Any:
     if re.match("^https?://", uri):
         return json.loads(requests.get(uri).text)
-    elif re.match("^s3://", uri):
-        import json
-        import boto3
-        from urllib.parse import urlparse
-        s3 = boto3.resource('s3')
-        u = urlparse(uri)
-        s3_object =  s3.Object(u.netloc, u.path.lstrip('/'))
-        return json.loads(s3_object.get()['Body'].read().decode('utf-8'))
-        
-        '''
-        from urllib.parse import urlparse
-        s3_client = AwsSourceConfig().get_s3_client()
-        u = urlparse(uri)
-        return json.loads(s3_client.get_object(Bucket=u.netloc, Key=u.path.lstrip('/'))['Body'].read().decode('utf-8'))
-        '''
     else:
         with open(uri, "r") as f:
             return json.load(f)
