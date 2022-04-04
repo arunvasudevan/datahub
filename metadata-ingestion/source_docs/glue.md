@@ -104,9 +104,6 @@ Note that a `.` is used to denote nested fields in the YAML recipe.
 | `minimum_name`                |          | `True`       | Deequ metrics name for minimum. Only works when extract_profile is True.                     |
 | `mean_name`                |          | `True`       | Deequ metrics name for mean. Only works when extract_profile is True.                     |
 | `sdv_name`                |          | `True`       | Deequ metrics name for standard deviation. Only works when extract_profile is True.                     |
-
-
-
 | `extract_owners`                |          | `True`       | When enabled, extracts ownership from Glue directly and overwrites existing owners. When disabled, ownership is left empty for datasets.                     |
 | `domain.domain_key.allow`       |          |              | List of regex patterns for tables to set domain_key domain key (domain_key can be any string like `sales`. There can be multiple domain key specified. |
 | `domain.domain_key.deny`        |          |              | List of regex patterns for tables to not assign domain_key. There can be multiple domain key specified.                                               |
