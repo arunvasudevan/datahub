@@ -11,7 +11,7 @@ from pydantic import validator
 
 from datahub.configuration.common import AllowDenyPattern, ConfigurationError
 from datahub.emitter import mce_builder
-from datahub.emitter.mce_builder import make_dataset_urn, make_domain_urn
+from datahub.emitter.mce_builder import make_dataset_urn, make_domain_urn, get_sys_time
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.emitter.mcp_builder import (
     DatabaseKey,
@@ -39,7 +39,9 @@ from datahub.metadata.schema_classes import (
     DataJobInfoClass,
     DataJobInputOutputClass,
     DataJobSnapshotClass,
+    DatasetFieldProfileClass,
     DatasetLineageTypeClass,
+    DatasetProfileClass,
     DatasetPropertiesClass,
     MetadataChangeEventClass,
     OwnerClass,
@@ -61,7 +63,9 @@ class GlueSourceConfig(AwsSourceConfig):
     ignore_unsupported_connectors: Optional[bool] = True
     emit_s3_lineage: bool = False
     glue_s3_lineage_direction: str = "upstream"
+    extract_profile: bool = False
     domain: Dict[str, AllowDenyPattern] = dict()
+    
 
     @property
     def glue_client(self):
@@ -100,7 +104,7 @@ class GlueSource(Source):
         super().__init__(ctx)
         self.extract_owners = config.extract_owners
         self.source_config = config
-        self.report = GlueSourceReport()
+        self.report = GlueSourceReport()    
         self.glue_client = config.glue_client
         self.s3_client = config.s3_client
         self.extract_transforms = config.extract_transforms
@@ -162,14 +166,8 @@ class GlueSource(Source):
 
         # download the script contents
         # see https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3.html#S3.Client.get_object
-
-        
-        try: 
-            obj = self.s3_client.get_object(Bucket=bucket, Key=key)
-            script = obj["Body"].read().decode("utf-8")
-        except Exception as e:
-            print("this is a test message from master branch")
-            print(e)
+        obj = self.s3_client.get_object(Bucket=bucket, Key=key)
+        script = obj["Body"].read().decode("utf-8")
 
         try:
             # extract the job DAG from the script
@@ -535,6 +533,65 @@ class GlueSource(Source):
                         )
                         return mcp
         return None
+    
+    def get_profile_if_enabled(
+        self, mce: MetadataChangeEventClass, database_name: str, table_name: str 
+    ) -> Optional[MetadataChangeProposalWrapper]:
+        if self.source_config.extract_profile:
+
+            # extract profile stats from glue table
+            response = self.glue_client.get_table(
+                DatabaseName=database_name,
+                Name=table_name
+            )
+            column_stats = response['Table']['StorageDescriptor']['Columns']
+            table_stats = response['Table']['Parameters']
+
+            # instantiate profile class
+            profile_payload = DatasetProfileClass(timestampMillis=get_sys_time())
+
+            # for tables with no Deequ profile
+            if not 'DQP__Size' in table_stats:
+                return None
+
+            # table level stats
+            profile_payload.rowCount = int(float(table_stats['DQP__Size']))
+            profile_payload.columnCount = int(table_stats['DQP__column_count'])
+           
+            # column level stats
+            profile_payload.fieldProfiles = []
+            for profile in column_stats:
+                column = profile['Name']
+                column_params = profile['Parameters']
+
+                # instantiate column profile class for each column
+                column_profile = DatasetFieldProfileClass(fieldPath=column)
+                
+                if 'DQP__Completeness' in column_params:
+                    column_profile.nullProportion = 1 - float(column_params['DQP__Completeness'])
+                if 'DQP__Distinctness' in column_params:
+                    column_profile.uniqueProportion = float(column_params['DQP__Distinctness'])
+                if 'DQP__Maximum' in column_params:
+                    column_profile.max = column_params['DQP__Maximum']
+                if 'DQP__Mean' in column_params:
+                    column_profile.mean = column_params['DQP__Mean']
+                if 'DQP__Minimum' in column_params:
+                    column_profile.min = column_params['DQP__Minimum']
+                if 'DQP__StandardDeviation' in column_params:
+                    column_profile.stdev = column_params['DQP__StandardDeviation']
+
+                profile_payload.fieldProfiles.append(column_profile)
+
+
+            mcp = MetadataChangeProposalWrapper(
+                entityType="dataset",
+                entityUrn=mce.proposedSnapshot.urn,
+                changeType=ChangeTypeClass.UPSERT,
+                aspectName="datasetProfile",
+                aspect=profile_payload,
+            )
+            return mcp
+        return None
 
     def gen_database_key(self, database: str) -> DatabaseKey:
         return DatabaseKey(
@@ -625,10 +682,21 @@ class GlueSource(Source):
             yield from self.add_table_to_database_container(
                 dataset_urn=dataset_urn, db_name=database_name
             )
+
+            # for emiting lineage
             mcp = self.get_lineage_if_enabled(mce)
             if mcp:
                 mcp_wu = MetadataWorkUnit(
                     id=f"{full_table_name}-upstreamLineage", mcp=mcp
+                )
+                self.report.report_workunit(mcp_wu)
+                yield mcp_wu
+
+            # for emitting profile
+            mcp = self.get_profile_if_enabled(mce, database_name, table_name)
+            if mcp:
+                mcp_wu = MetadataWorkUnit(
+                    id=f"profile-{full_table_name}", mcp=mcp
                 )
                 self.report.report_workunit(mcp_wu)
                 yield mcp_wu
