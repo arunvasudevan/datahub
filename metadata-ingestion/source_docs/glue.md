@@ -95,6 +95,15 @@ Note that a `.` is used to denote nested fields in the YAML recipe.
 | `ignore_unsupported_connectors` |          | `True`       | Whether to ignore unsupported connectors. If disabled, an error will be raised.                                                                              |
 | `emit_s3_lineage`               |          | `True`       | Whether to emit S3-to-Glue lineage.                                                                                                                          |
 | `glue_s3_lineage_direction`     |          | `upstream`   | If `upstream`, S3 is upstream to Glue. If `downstream` S3 is downstream to Glue.                                                                             |
+| `extract_profile`                |          | `True`       | When enabled, extracts data profile from glue table parameters.                     |
+| `size_name`                |          | `True`       | Deequ metrics name for row count. Only works when extract_profile is True. Please see https://aws.amazon.com/blogs/big-data/test-data-quality-at-scale-with-deequ/                    |
+| `column_count_name`                |          | `True`       | Deequ metrics name for column count. Only works when extract_profile is True.                     |
+| `completeness_name`                |          | `True`       | Deequ metrics name for completeness. Only works when extract_profile is True.                     |
+| `distinctness_name`                |          | `True`       | Deequ metrics name for distinctness. Only works when extract_profile is True.                     |
+| `maximum_name`                |          | `True`       | Deequ metrics name for maximum. Only works when extract_profile is True.                     |
+| `minimum_name`                |          | `True`       | Deequ metrics name for minimum. Only works when extract_profile is True.                     |
+| `mean_name`                |          | `True`       | Deequ metrics name for mean. Only works when extract_profile is True.                     |
+| `sdv_name`                |          | `True`       | Deequ metrics name for standard deviation. Only works when extract_profile is True.                     |
 | `extract_owners`                |          | `True`       | When enabled, extracts ownership from Glue directly and overwrites existing owners. When disabled, ownership is left empty for datasets.                     |
 | `domain.domain_key.allow`       |          |              | List of regex patterns for tables to set domain_key domain key (domain_key can be any string like `sales`. There can be multiple domain key specified. |
 | `domain.domain_key.deny`        |          |              | List of regex patterns for tables to not assign domain_key. There can be multiple domain key specified.                                               |

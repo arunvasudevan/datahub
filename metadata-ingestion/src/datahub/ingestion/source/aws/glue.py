@@ -11,7 +11,7 @@ from pydantic import validator
 
 from datahub.configuration.common import AllowDenyPattern, ConfigurationError
 from datahub.emitter import mce_builder
-from datahub.emitter.mce_builder import make_dataset_urn, make_domain_urn
+from datahub.emitter.mce_builder import make_dataset_urn, make_domain_urn, get_sys_time
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.emitter.mcp_builder import (
     DatabaseKey,
@@ -39,7 +39,9 @@ from datahub.metadata.schema_classes import (
     DataJobInfoClass,
     DataJobInputOutputClass,
     DataJobSnapshotClass,
+    DatasetFieldProfileClass,
     DatasetLineageTypeClass,
+    DatasetProfileClass,
     DatasetPropertiesClass,
     MetadataChangeEventClass,
     OwnerClass,
@@ -62,6 +64,18 @@ class GlueSourceConfig(AwsSourceConfig):
     emit_s3_lineage: bool = False
     glue_s3_lineage_direction: str = "upstream"
     domain: Dict[str, AllowDenyPattern] = dict()
+
+    # for profiling
+    extract_profile: bool = False
+    size_name: Optional[str] = None
+    column_count_name: Optional[str] = None
+    completeness_name: Optional[str] = None
+    distinctness_name: Optional[str] = None
+    maximum_name: Optional[str] = None
+    minimum_name: Optional[str] = None
+    mean_name: Optional[str] = None
+    sdv_name: Optional[str] = None
+    
 
     @property
     def glue_client(self):
@@ -100,7 +114,7 @@ class GlueSource(Source):
         super().__init__(ctx)
         self.extract_owners = config.extract_owners
         self.source_config = config
-        self.report = GlueSourceReport()
+        self.report = GlueSourceReport()    
         self.glue_client = config.glue_client
         self.s3_client = config.s3_client
         self.extract_transforms = config.extract_transforms
@@ -529,6 +543,75 @@ class GlueSource(Source):
                         )
                         return mcp
         return None
+    
+    def get_profile_if_enabled(
+        self, mce: MetadataChangeEventClass, database_name: str, table_name: str 
+    ) -> Optional[MetadataChangeProposalWrapper]:
+        if self.source_config.extract_profile:
+
+            # extract profile stats from glue table
+            response = self.glue_client.get_table(
+                DatabaseName=database_name,
+                Name=table_name
+            )
+            column_stats = response['Table']['StorageDescriptor']['Columns']
+            table_stats = response['Table']['Parameters']
+
+            # instantiate profile class
+            profile_payload = DatasetProfileClass(timestampMillis=get_sys_time())
+
+            # construct metric names
+            metrics_size = f'DQP__{self.source_config.size_name}'
+            metrics_column_count = f'DQP__{self.source_config.column_count_name}'
+            metrics_completeness = f'DQP__{self.source_config.completeness_name}'
+            metrics_distinctness = f'DQP__{self.source_config.distinctness_name}'
+            metrics_maximum = f'DQP__{self.source_config.maximum_name}'
+            metrics_minimum = f'DQP__{self.source_config.minimum_name}'
+            metrics_mean = f'DQP__{self.source_config.mean_name}'
+            metrics_sdv = f'DQP__{self.source_config.sdv_name}'
+
+            # for tables with no Deequ profile
+            if not metrics_size in table_stats:
+                return None
+
+            # table level stats
+            profile_payload.rowCount = int(float(table_stats[metrics_size]))
+            profile_payload.columnCount = int(float(table_stats[metrics_column_count]))
+           
+            # column level stats
+            profile_payload.fieldProfiles = []
+            for profile in column_stats:
+                column = profile['Name']
+                column_params = profile['Parameters']
+
+                # instantiate column profile class for each column
+                column_profile = DatasetFieldProfileClass(fieldPath=column)
+                
+                if metrics_completeness in column_params:
+                    column_profile.nullProportion = 1 - float(column_params[metrics_completeness])
+                if metrics_distinctness in column_params:
+                    column_profile.uniqueProportion = float(column_params[metrics_distinctness])
+                if metrics_maximum in column_params:
+                    column_profile.max = column_params[metrics_maximum]
+                if metrics_mean in column_params:
+                    column_profile.mean = column_params[metrics_mean]
+                if metrics_minimum in column_params:
+                    column_profile.min = column_params[metrics_minimum]
+                if metrics_sdv in column_params:
+                    column_profile.stdev = column_params[metrics_sdv]
+
+                profile_payload.fieldProfiles.append(column_profile)
+
+
+            mcp = MetadataChangeProposalWrapper(
+                entityType="dataset",
+                entityUrn=mce.proposedSnapshot.urn,
+                changeType=ChangeTypeClass.UPSERT,
+                aspectName="datasetProfile",
+                aspect=profile_payload,
+            )
+            return mcp
+        return None
 
     def gen_database_key(self, database: str) -> DatabaseKey:
         return DatabaseKey(
@@ -619,10 +702,21 @@ class GlueSource(Source):
             yield from self.add_table_to_database_container(
                 dataset_urn=dataset_urn, db_name=database_name
             )
+
+            # for emiting lineage
             mcp = self.get_lineage_if_enabled(mce)
             if mcp:
                 mcp_wu = MetadataWorkUnit(
                     id=f"{full_table_name}-upstreamLineage", mcp=mcp
+                )
+                self.report.report_workunit(mcp_wu)
+                yield mcp_wu
+
+            # for emitting profile
+            mcp = self.get_profile_if_enabled(mce, database_name, table_name)
+            if mcp:
+                mcp_wu = MetadataWorkUnit(
+                    id=f"profile-{full_table_name}", mcp=mcp
                 )
                 self.report.report_workunit(mcp_wu)
                 yield mcp_wu
