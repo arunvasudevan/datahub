@@ -104,7 +104,7 @@ class GlueSource(Source):
         super().__init__(ctx)
         self.extract_owners = config.extract_owners
         self.source_config = config
-        self.report = GlueSourceReport()    
+        self.report = GlueSourceReport()
         self.glue_client = config.glue_client
         self.s3_client = config.s3_client
         self.extract_transforms = config.extract_transforms
