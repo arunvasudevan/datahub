@@ -65,7 +65,6 @@ class GlueSourceConfig(AwsSourceConfig):
     glue_s3_lineage_direction: str = "upstream"
     extract_profile: bool = False
     domain: Dict[str, AllowDenyPattern] = dict()
-    
 
     @property
     def glue_client(self):
