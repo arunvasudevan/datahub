@@ -4,7 +4,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
-from unittest.util import strclass
 from urllib.parse import urlparse
 
 import yaml
