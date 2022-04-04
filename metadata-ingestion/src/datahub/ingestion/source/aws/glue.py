@@ -63,8 +63,19 @@ class GlueSourceConfig(AwsSourceConfig):
     ignore_unsupported_connectors: Optional[bool] = True
     emit_s3_lineage: bool = False
     glue_s3_lineage_direction: str = "upstream"
-    extract_profile: bool = False
     domain: Dict[str, AllowDenyPattern] = dict()
+
+    # for profiling
+    extract_profile: bool = False
+    size_name: Optional[str] = None
+    column_count_name: Optional[str] = None
+    completeness_name: Optional[str] = None
+    distinctness_name: Optional[str] = None
+    maximum_name: Optional[str] = None
+    minimum_name: Optional[str] = None
+    mean_name: Optional[str] = None
+    sdv_name: Optional[str] = None
+    
 
     @property
     def glue_client(self):
@@ -103,7 +114,7 @@ class GlueSource(Source):
         super().__init__(ctx)
         self.extract_owners = config.extract_owners
         self.source_config = config
-        self.report = GlueSourceReport()
+        self.report = GlueSourceReport()    
         self.glue_client = config.glue_client
         self.s3_client = config.s3_client
         self.extract_transforms = config.extract_transforms
@@ -549,13 +560,23 @@ class GlueSource(Source):
             # instantiate profile class
             profile_payload = DatasetProfileClass(timestampMillis=get_sys_time())
 
+            # construct metric names
+            metrics_size = f'DQP__{self.source_config.size_name}'
+            metrics_column_count = f'DQP__{self.source_config.column_count_name}'
+            metrics_completeness = f'DQP__{self.source_config.completeness_name}'
+            metrics_distinctness = f'DQP__{self.source_config.distinctness_name}'
+            metrics_maximum = f'DQP__{self.source_config.maximum_name}'
+            metrics_minimum = f'DQP__{self.source_config.minimum_name}'
+            metrics_mean = f'DQP__{self.source_config.mean_name}'
+            metrics_sdv = f'DQP__{self.source_config.sdv_name}'
+
             # for tables with no Deequ profile
-            if not 'DQP__Size' in table_stats:
+            if not metrics_size in table_stats:
                 return None
 
             # table level stats
-            profile_payload.rowCount = int(float(table_stats['DQP__Size']))
-            profile_payload.columnCount = int(table_stats['DQP__column_count'])
+            profile_payload.rowCount = int(float(table_stats[metrics_size]))
+            profile_payload.columnCount = int(float(table_stats[metrics_column_count]))
            
             # column level stats
             profile_payload.fieldProfiles = []
@@ -566,18 +587,18 @@ class GlueSource(Source):
                 # instantiate column profile class for each column
                 column_profile = DatasetFieldProfileClass(fieldPath=column)
                 
-                if 'DQP__Completeness' in column_params:
-                    column_profile.nullProportion = 1 - float(column_params['DQP__Completeness'])
-                if 'DQP__Distinctness' in column_params:
-                    column_profile.uniqueProportion = float(column_params['DQP__Distinctness'])
-                if 'DQP__Maximum' in column_params:
-                    column_profile.max = column_params['DQP__Maximum']
-                if 'DQP__Mean' in column_params:
-                    column_profile.mean = column_params['DQP__Mean']
-                if 'DQP__Minimum' in column_params:
-                    column_profile.min = column_params['DQP__Minimum']
-                if 'DQP__StandardDeviation' in column_params:
-                    column_profile.stdev = column_params['DQP__StandardDeviation']
+                if metrics_completeness in column_params:
+                    column_profile.nullProportion = 1 - float(column_params[metrics_completeness])
+                if metrics_distinctness in column_params:
+                    column_profile.uniqueProportion = float(column_params[metrics_distinctness])
+                if metrics_maximum in column_params:
+                    column_profile.max = column_params[metrics_maximum]
+                if metrics_mean in column_params:
+                    column_profile.mean = column_params[metrics_mean]
+                if metrics_minimum in column_params:
+                    column_profile.min = column_params[metrics_minimum]
+                if metrics_sdv in column_params:
+                    column_profile.stdev = column_params[metrics_sdv]
 
                 profile_payload.fieldProfiles.append(column_profile)
 
