@@ -73,6 +73,7 @@ class GlueSourceConfig(AwsSourceConfig, PlatformSourceConfigBase):
     emit_s3_lineage: bool = False
     glue_s3_lineage_direction: str = "upstream"
     domain: Dict[str, AllowDenyPattern] = dict()
+    catalog_id: str
 
     @property
     def glue_client(self):
@@ -162,7 +163,7 @@ class GlueSource(Source):
 
         # see https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/glue.html#Glue.Client.get_jobs
         paginator = self.glue_client.get_paginator("get_jobs")
-        for page in paginator.paginate():
+        for page in paginator.paginate(CatalogId=self.source_config.catalog_id):
             jobs += page["Jobs"]
 
         return jobs
@@ -495,7 +496,8 @@ class GlueSource(Source):
 
             # see https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/glue.html#Glue.Client.get_tables
             paginator = self.glue_client.get_paginator("get_tables")
-            for page in paginator.paginate(DatabaseName=database_name):
+            for page in paginator.paginate(DatabaseName=database_name,
+                                          CatalogId=self.source_config.catalog_id):
                 new_tables += page["TableList"]
 
             return new_tables
@@ -505,7 +507,7 @@ class GlueSource(Source):
 
             # see https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/glue.html#Glue.Client.get_databases
             paginator = self.glue_client.get_paginator("get_databases")
-            for page in paginator.paginate():
+            for page in paginator.paginate(CatalogId=self.source_config.catalog_id):
                 for db in page["DatabaseList"]:
                     if self.source_config.database_pattern.allowed(db["Name"]):
                         database_names.append(db["Name"])
