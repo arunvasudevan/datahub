@@ -1,3 +1,4 @@
+from ast import Str
 import logging
 import typing
 from collections import defaultdict
@@ -10,14 +11,8 @@ import yaml
 from pydantic import validator
 
 from datahub.configuration.common import AllowDenyPattern, ConfigurationError
-from datahub.configuration.source_common import PlatformSourceConfigBase
 from datahub.emitter import mce_builder
-from datahub.emitter.mce_builder import (
-    make_data_platform_urn,
-    make_dataplatform_instance_urn,
-    make_dataset_urn_with_platform_instance,
-    make_domain_urn,
-)
+from datahub.emitter.mce_builder import make_dataset_urn, make_domain_urn, get_sys_time
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.emitter.mcp_builder import (
     DatabaseKey,
@@ -45,8 +40,9 @@ from datahub.metadata.schema_classes import (
     DataJobInfoClass,
     DataJobInputOutputClass,
     DataJobSnapshotClass,
-    DataPlatformInstanceClass,
+    DatasetFieldProfileClass,
     DatasetLineageTypeClass,
+    DatasetProfileClass,
     DatasetPropertiesClass,
     MetadataChangeEventClass,
     OwnerClass,
@@ -60,11 +56,7 @@ from datahub.utilities.hive_schema_to_avro import get_schema_fields_for_hive_col
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_PLATFORM = "glue"
-VALID_PLATFORMS = [DEFAULT_PLATFORM, "athena"]
-
-
-class GlueSourceConfig(AwsSourceConfig, PlatformSourceConfigBase):
+class GlueSourceConfig(AwsSourceConfig):
 
     extract_owners: Optional[bool] = True
     extract_transforms: Optional[bool] = True
@@ -73,6 +65,19 @@ class GlueSourceConfig(AwsSourceConfig, PlatformSourceConfigBase):
     emit_s3_lineage: bool = False
     glue_s3_lineage_direction: str = "upstream"
     domain: Dict[str, AllowDenyPattern] = dict()
+    catalog_id: str
+
+    # for profiling
+    extract_profile: bool = False
+    size_name: Optional[str] = None
+    column_count_name: Optional[str] = None
+    completeness_name: Optional[str] = None
+    distinctness_name: Optional[str] = None
+    maximum_name: Optional[str] = None
+    minimum_name: Optional[str] = None
+    mean_name: Optional[str] = None
+    sdv_name: Optional[str] = None
+    
 
     @property
     def glue_client(self):
@@ -89,24 +94,6 @@ class GlueSourceConfig(AwsSourceConfig, PlatformSourceConfigBase):
                 "glue_s3_lineage_direction must be either upstream or downstream"
             )
         return v.lower()
-
-    @validator("underlying_platform")
-    def underlying_platform_validator(cls, v: str) -> str:
-        if not v or v in VALID_PLATFORMS:
-            return v
-        else:
-            raise ConfigurationError(
-                f"'underlying_platform' can only take following values: {VALID_PLATFORMS}"
-            )
-
-    @validator("platform")
-    def platform_validator(cls, v: str) -> str:
-        if not v or v in VALID_PLATFORMS:
-            return v
-        else:
-            raise ConfigurationError(
-                f"'platform' can only take following values: {VALID_PLATFORMS}"
-            )
 
 
 @dataclass
@@ -129,10 +116,11 @@ class GlueSource(Source):
         super().__init__(ctx)
         self.extract_owners = config.extract_owners
         self.source_config = config
-        self.report = GlueSourceReport()
+        self.report = GlueSourceReport()    
         self.glue_client = config.glue_client
         self.s3_client = config.s3_client
         self.extract_transforms = config.extract_transforms
+        self.underlying_platform = config.underlying_platform
         self.env = config.env
 
     @classmethod
@@ -140,18 +128,10 @@ class GlueSource(Source):
         config = GlueSourceConfig.parse_obj(config_dict)
         return cls(config, ctx)
 
-    @property
-    def platform(self) -> str:
-        """
-        This deprecates "underlying_platform" field in favour of the standard "platform" one, which has
-        more priority when both are defined.
-        :return: platform, otherwise underlying_platform, otherwise "glue"
-        """
-        return (
-            self.source_config.platform
-            or self.source_config.underlying_platform
-            or DEFAULT_PLATFORM
-        )
+    def get_underlying_platform(self):
+        if self.underlying_platform in ["athena"]:
+            return self.underlying_platform
+        return "glue"
 
     def get_all_jobs(self):
         """
@@ -162,7 +142,7 @@ class GlueSource(Source):
 
         # see https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/glue.html#Glue.Client.get_jobs
         paginator = self.glue_client.get_paginator("get_jobs")
-        for page in paginator.paginate():
+        for page in paginator.paginate(CatalogId=self.source_config.catalog_id):
             jobs += page["Jobs"]
 
         return jobs
@@ -275,12 +255,7 @@ class GlueSource(Source):
                 full_table_name = f"{node_args['database']}.{node_args['table_name']}"
 
                 # we know that the table will already be covered when ingesting Glue tables
-                node_urn = make_dataset_urn_with_platform_instance(
-                    platform=self.platform,
-                    name=full_table_name,
-                    env=self.env,
-                    platform_instance=self.source_config.platform_instance,
-                )
+                node_urn = f"urn:li:dataset:(urn:li:dataPlatform:{self.get_underlying_platform()},{full_table_name},{self.env})"
 
             # if data object is S3 bucket
             elif node_args.get("connection_type") == "s3":
@@ -495,7 +470,8 @@ class GlueSource(Source):
 
             # see https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/glue.html#Glue.Client.get_tables
             paginator = self.glue_client.get_paginator("get_tables")
-            for page in paginator.paginate(DatabaseName=database_name):
+            for page in paginator.paginate(DatabaseName=database_name,
+                                            CatalogId=self.source_config.catalog_id):
                 new_tables += page["TableList"]
 
             return new_tables
@@ -505,7 +481,7 @@ class GlueSource(Source):
 
             # see https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/glue.html#Glue.Client.get_databases
             paginator = self.glue_client.get_paginator("get_databases")
-            for page in paginator.paginate():
+            for page in paginator.paginate(CatalogId=self.source_config.catalog_id):
                 for db in page["DatabaseList"]:
                     if self.source_config.database_pattern.allowed(db["Name"]):
                         database_names.append(db["Name"])
@@ -570,15 +546,81 @@ class GlueSource(Source):
                         )
                         return mcp
         return None
+    
+    def get_profile_if_enabled(
+        self, mce: MetadataChangeEventClass, database_name: str, table_name: str 
+    ) -> Optional[MetadataChangeProposalWrapper]:
+        if self.source_config.extract_profile:
+
+            # extract profile stats from glue table
+            response = self.glue_client.get_table(
+                DatabaseName=database_name,
+                Name=table_name
+            )
+            column_stats = response['Table']['StorageDescriptor']['Columns']
+            table_stats = response['Table']['Parameters']
+
+            # instantiate profile class
+            profile_payload = DatasetProfileClass(timestampMillis=get_sys_time())
+
+            # construct metric names
+            metrics_size = f'DQP__{self.source_config.size_name}'
+            metrics_column_count = f'DQP__{self.source_config.column_count_name}'
+            metrics_completeness = f'DQP__{self.source_config.completeness_name}'
+            metrics_distinctness = f'DQP__{self.source_config.distinctness_name}'
+            metrics_maximum = f'DQP__{self.source_config.maximum_name}'
+            metrics_minimum = f'DQP__{self.source_config.minimum_name}'
+            metrics_mean = f'DQP__{self.source_config.mean_name}'
+            metrics_sdv = f'DQP__{self.source_config.sdv_name}'
+
+            # for tables with no Deequ profile
+            if not metrics_size in table_stats:
+                return None
+
+            # table level stats
+            profile_payload.rowCount = int(float(table_stats[metrics_size]))
+            profile_payload.columnCount = int(float(table_stats[metrics_column_count]))
+           
+            # column level stats
+            profile_payload.fieldProfiles = []
+            for profile in column_stats:
+                column = profile['Name']
+                column_params = profile['Parameters']
+
+                # instantiate column profile class for each column
+                column_profile = DatasetFieldProfileClass(fieldPath=column)
+                
+                if metrics_completeness in column_params:
+                    column_profile.nullProportion = 1 - float(column_params[metrics_completeness])
+                if metrics_distinctness in column_params:
+                    column_profile.uniqueProportion = float(column_params[metrics_distinctness])
+                if metrics_maximum in column_params:
+                    column_profile.max = column_params[metrics_maximum]
+                if metrics_mean in column_params:
+                    column_profile.mean = column_params[metrics_mean]
+                if metrics_minimum in column_params:
+                    column_profile.min = column_params[metrics_minimum]
+                if metrics_sdv in column_params:
+                    column_profile.stdev = column_params[metrics_sdv]
+
+                profile_payload.fieldProfiles.append(column_profile)
+
+
+            mcp = MetadataChangeProposalWrapper(
+                entityType="dataset",
+                entityUrn=mce.proposedSnapshot.urn,
+                changeType=ChangeTypeClass.UPSERT,
+                aspectName="datasetProfile",
+                aspect=profile_payload,
+            )
+            return mcp
+        return None
 
     def gen_database_key(self, database: str) -> DatabaseKey:
         return DatabaseKey(
             database=database,
-            platform=self.platform,
-            instance=self.source_config.platform_instance
-            # keeps backward compatibility when platform instance is missed
-            if self.source_config.platform_instance is not None
-            else self.source_config.env,
+            platform=self.get_underlying_platform(),
+            instance=self.env,
         )
 
     def gen_database_containers(self, database: str) -> Iterable[MetadataWorkUnit]:
@@ -652,11 +694,8 @@ class GlueSource(Source):
             self.report.report_workunit(workunit)
             yield workunit
 
-            dataset_urn: str = make_dataset_urn_with_platform_instance(
-                platform=self.platform,
-                name=full_table_name,
-                env=self.env,
-                platform_instance=self.source_config.platform_instance,
+            dataset_urn: str = make_dataset_urn(
+                self.get_underlying_platform(), full_table_name, self.env
             )
             yield from self._get_domain_wu(
                 dataset_name=full_table_name,
@@ -666,10 +705,21 @@ class GlueSource(Source):
             yield from self.add_table_to_database_container(
                 dataset_urn=dataset_urn, db_name=database_name
             )
+
+            # for emiting lineage
             mcp = self.get_lineage_if_enabled(mce)
             if mcp:
                 mcp_wu = MetadataWorkUnit(
                     id=f"{full_table_name}-upstreamLineage", mcp=mcp
+                )
+                self.report.report_workunit(mcp_wu)
+                yield mcp_wu
+
+            # for emitting profile
+            mcp = self.get_profile_if_enabled(mce, database_name, table_name)
+            if mcp:
+                mcp_wu = MetadataWorkUnit(
+                    id=f"profile-{full_table_name}", mcp=mcp
                 )
                 self.report.report_workunit(mcp_wu)
                 yield mcp_wu
@@ -683,7 +733,7 @@ class GlueSource(Source):
         for job in self.get_all_jobs():
 
             flow_urn = mce_builder.make_data_flow_urn(
-                self.platform, job["Name"], self.env
+                self.get_underlying_platform(), job["Name"], self.env
             )
 
             flow_wu = self.get_dataflow_wu(flow_urn, job)
@@ -789,28 +839,13 @@ class GlueSource(Source):
                 schemaName=table_name,
                 version=0,
                 fields=fields,
-                platform=f"urn:li:dataPlatform:{self.platform}",
+                platform=f"urn:li:dataPlatform:{self.get_underlying_platform()}",
                 hash="",
                 platformSchema=MySqlDDL(tableSchema=""),
             )
 
-        def get_data_platform_instance() -> DataPlatformInstanceClass:
-            return DataPlatformInstanceClass(
-                platform=make_data_platform_urn(self.platform),
-                instance=make_dataplatform_instance_urn(
-                    self.platform, self.source_config.platform_instance
-                )
-                if self.source_config.platform_instance
-                else None,
-            )
-
         dataset_snapshot = DatasetSnapshot(
-            urn=make_dataset_urn_with_platform_instance(
-                platform=self.platform,
-                name=table_name,
-                env=self.env,
-                platform_instance=self.source_config.platform_instance,
-            ),
+            urn=make_dataset_urn(self.get_underlying_platform(), table_name, self.env),
             aspects=[],
         )
 
@@ -823,7 +858,6 @@ class GlueSource(Source):
 
         dataset_snapshot.aspects.append(get_dataset_properties())
         dataset_snapshot.aspects.append(get_schema_metadata(self))
-        dataset_snapshot.aspects.append(get_data_platform_instance())
 
         metadata_record = MetadataChangeEvent(proposedSnapshot=dataset_snapshot)
         return metadata_record
