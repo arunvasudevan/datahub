@@ -111,6 +111,8 @@ class DBTConfig(StatefulIngestionConfigBase):
     enable_meta_mapping = True
     write_semantics: str = "PATCH"
     strip_user_ids_from_email: bool = False
+    owner_naming_pattern: Optional[str]
+    owner_group_name: str = "owner"
 
     # Custom Stateful Ingestion settings
     stateful_ingestion: Optional[DBTStatefulIngestionConfig] = None
@@ -940,17 +942,6 @@ class DBTSource(StatefulIngestionSourceBase):
         )
         return dbt_properties
 
-    def _get_owners_aspect(self, node: DBTNode) -> OwnershipClass:
-        owners = [
-            OwnerClass(
-                owner=f"urn:li:corpuser:{node.owner}",
-                type=OwnershipTypeClass.DATAOWNER,
-            )
-        ]
-        return OwnershipClass(
-            owners=owners,
-        )
-
     def _create_view_properties_aspect(self, node: DBTNode) -> ViewPropertiesClass:
         materialized = node.materialization in {"table", "incremental"}
         # this function is only called when raw sql is present. assert is added to satisfy lint checks
@@ -1026,9 +1017,20 @@ class DBTSource(StatefulIngestionSourceBase):
     ) -> List[OwnerClass]:
         owner_list: List[OwnerClass] = []
         if node.owner:
+            owner = node.owner
+            if owner and self.config.owner_naming_pattern:
+                found = re.match(re.compile(self.config.owner_naming_pattern), owner)
+                if found:
+                    owner = found.group(self.config.owner_group_name)
+                logger.debug(
+                    f"Owner (after applying regex):{owner}, Owner group name: {self.config.owner_group_name}"
+                )
+            if self.config.strip_user_ids_from_email:
+                owner = owner.split("@")[0]
+                logger.debug(f"Owner (after stripping email):{owner}")
             owner_list.append(
                 OwnerClass(
-                    owner=f"urn:li:corpuser:{node.owner}",
+                    owner=f"urn:li:corpuser:{owner}",
                     type=OwnershipTypeClass.DATAOWNER,
                 )
             )
