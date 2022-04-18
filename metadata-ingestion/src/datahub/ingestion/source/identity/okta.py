@@ -133,6 +133,7 @@ class OktaSource(Source):
             for datahub_corp_group_snapshot in datahub_corp_group_snapshots:
                 mce = MetadataChangeEvent(proposedSnapshot=datahub_corp_group_snapshot)
                 wu = MetadataWorkUnit(id=datahub_corp_group_snapshot.urn, mce=mce)
+                #logger.info(f"Ingested Workunits for CorpGroups: {wu}")
                 self.report.report_workunit(wu)
                 yield wu
 
@@ -173,10 +174,12 @@ class OktaSource(Source):
                         datahub_corp_user_urn_to_group_membership[
                             datahub_corp_user_urn
                         ].groups.append(datahub_corp_group_urn)
+                        logger.info(f"Appending {datahub_corp_group_urn} to user: {datahub_corp_user_urn}")
                     else:
                         datahub_corp_user_urn_to_group_membership[
                             datahub_corp_user_urn
                         ] = GroupMembershipClass(groups=[datahub_corp_group_urn])
+                        logger.info(f"Creating {datahub_corp_group_urn} for user: {datahub_corp_user_urn}")
 
         # Step 3: Produce MetadataWorkUnits for CorpUsers.
         if self.config.ingest_users:
@@ -199,6 +202,7 @@ class OktaSource(Source):
                     datahub_corp_user_snapshot.aspects.append(datahub_group_membership)
                 mce = MetadataChangeEvent(proposedSnapshot=datahub_corp_user_snapshot)
                 wu = MetadataWorkUnit(id=datahub_corp_user_snapshot.urn, mce=mce)
+                logger.info(f"Ingested Workunit for CorpUsers: {wu}")
                 self.report.report_workunit(wu)
                 yield wu
 

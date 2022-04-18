@@ -501,13 +501,16 @@ public class EbeanAspectDao {
     List<EbeanAspectV2.PrimaryKey> dbResults = exp.endOr().findIds();
 
     for (EbeanAspectV2.PrimaryKey key: dbResults) {
+      log.info("From DB- Urn: {}, Aspect: {}, currVersion: {}", urn, key.getAspect(), key.getVersion());
       result.put(key.getAspect(), key.getVersion());
     }
     for (String aspectName: aspectNames) {
       long nextVal = 0L;
       if (result.containsKey(aspectName)) {
         nextVal = result.get(aspectName) + 1L;
+        log.info("Contains ASpect - Urn: {}, Aspect: {}, nextVersion: {}", urn, aspectName, nextVal);
       }
+      log.info("Added to result - Aspect: {}, nextVersion: {}", aspectName, nextVal);
       result.put(aspectName, nextVal);
     }
     return result;
