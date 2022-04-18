@@ -501,6 +501,7 @@ public class EbeanAspectDao {
     List<EbeanAspectV2.PrimaryKey> dbResults = exp.endOr().findIds();
 
     for (EbeanAspectV2.PrimaryKey key: dbResults) {
+      log.info("Query- {}", exp.query());
       log.info("From DB- Urn: {}, Aspect: {}, currVersion: {}", urn, key.getAspect(), key.getVersion());
       result.put(key.getAspect(), key.getVersion());
     }

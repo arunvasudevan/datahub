@@ -345,7 +345,7 @@ public class EbeanEntityService extends EntityService {
         RecordTemplate newValue = aspectRecord.getSecond();
         EbeanAspectV2 latest = latestAspects.get(aspectName);
         long nextVersion = nextVersions.get(aspectName);
-        log.info("Urn - {}, AspectName- {}, nextVersion- {}", aspectName, nextVersion);
+        log.info("Urn - {}, AspectName- {}, nextVersion- {}", urn, aspectName, nextVersion);
         UpdateAspectResult updateResult = ingestAspectToLocalDBNoTransaction(urn, aspectName, ignored -> newValue, auditStamp, systemMetadata, 
           latest, nextVersion);
         result.add(new Pair<>(aspectName, updateResult));
