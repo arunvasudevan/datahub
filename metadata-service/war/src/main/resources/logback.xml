@@ -67,6 +67,9 @@
         <appender-ref ref="STDOUT" />
     </logger>
 
+    <logger name="io.ebean.SQL" level="TRACE">
+        <appender-ref ref="STDOUT" />
+    </logger>
 
     <root level="INFO">
         <appender-ref ref="STDOUT" />

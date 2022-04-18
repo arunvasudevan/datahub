@@ -498,10 +498,10 @@ public class EbeanAspectDao {
     if (exp == null) {
       return result;
     }
+    exp.orderBy("version");
     List<EbeanAspectV2.PrimaryKey> dbResults = exp.endOr().findIds();
 
     for (EbeanAspectV2.PrimaryKey key: dbResults) {
-      log.info("Query- {}", exp.query());
       log.info("From DB- Urn: {}, Aspect: {}, currVersion: {}", urn, key.getAspect(), key.getVersion());
       result.put(key.getAspect(), key.getVersion());
     }
@@ -509,7 +509,7 @@ public class EbeanAspectDao {
       long nextVal = 0L;
       if (result.containsKey(aspectName)) {
         nextVal = result.get(aspectName) + 1L;
-        log.info("Contains ASpect - Urn: {}, Aspect: {}, nextVersion: {}", urn, aspectName, nextVal);
+        log.info("Contains Aspect - Urn: {}, Aspect: {}, nextVersion: {}", urn, aspectName, nextVal);
       }
       log.info("Added to result - Aspect: {}, nextVersion: {}", aspectName, nextVal);
       result.put(aspectName, nextVal);
